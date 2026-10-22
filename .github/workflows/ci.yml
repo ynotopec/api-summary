@@ -1,0 +1,42 @@
+name: api-summary
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+      - run: pip install -r requirements.lock -r requirements-dev.lock
+      - run: pip install --no-deps -e .
+      - run: ruff check api_summary tests
+      - run: pytest -q
+      - run: docker build -t api-summary:test .
+      - name: Container smoke test
+        run: |
+          docker run -d --name summary-test -p 127.0.0.1:18080:8080 \
+            -e APP_ENV=development -e AUTH_ENABLED=false api-summary:test
+          trap 'docker logs summary-test; docker rm -f summary-test' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
